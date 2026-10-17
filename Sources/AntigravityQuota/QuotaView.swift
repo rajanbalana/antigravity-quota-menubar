@@ -44,7 +44,6 @@ struct QuotaProgressRow: View {
 
 public struct QuotaMenuView: View {
     @ObservedObject var service: QuotaService
-    @State private var refreshInterval: TimeInterval = 180
 
     public init(service: QuotaService) {
         self.service = service
