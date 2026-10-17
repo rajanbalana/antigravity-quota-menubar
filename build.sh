@@ -8,7 +8,7 @@ MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 
 echo "==> Compiling release binary..."
-swift build -c release
+swift build -c release --build-system native 2>/dev/null || swift build -c release
 
 echo "==> Creating .app bundle..."
 mkdir -p "$MACOS_DIR"
