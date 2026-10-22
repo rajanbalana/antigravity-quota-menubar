@@ -302,40 +302,22 @@ public final class QuotaService: ObservableObject {
         return parseQuotaSummary(json)
     }
 
-    private func parseQuotaSummary(_ json: [String: Any]) -> (gemini5h: QuotaBucket?, geminiWeekly: QuotaBucket?, thirdParty5h: QuotaBucket?, thirdPartyWeekly: QuotaBucket?) {
-        guard let groups = json["groups"] as? [[String: Any]] else { return (nil, nil, nil, nil) }
+    private func parseModelQuotas(_ json: [String: Any]) -> [ModelQuota] {
+        guard let rawModels = json["models"] as? [[String: Any]] else { return [] }
         let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withInternetDateTime]
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let fallbackFormatter = ISO8601DateFormatter()
+        fallbackFormatter.formatOptions = [.withInternetDateTime]
 
-        var gemini5h: QuotaBucket? = nil
-        var geminiWeekly: QuotaBucket? = nil
-        var thirdParty5h: QuotaBucket? = nil
-        var thirdPartyWeekly: QuotaBucket? = nil
-
-        for group in groups {
-            guard let buckets = group["buckets"] as? [[String: Any]] else { continue }
-            for bucket in buckets {
-                guard let bucketId = bucket["bucketId"] as? String else { continue }
-                let resetTimeString = bucket["resetTime"] as? String
-                let resetDate = resetTimeString.flatMap { isoFormatter.date(from: $0) }
-                let remaining = bucket["remainingFraction"] as? Double ?? 0.0
-
-                switch bucketId {
-                case "gemini-5h":
-                    gemini5h = QuotaBucket(id: bucketId, label: "Gemini · 5h Window", group: "Gemini", remainingFraction: remaining, resetTime: resetDate)
-                case "gemini-weekly":
-                    geminiWeekly = QuotaBucket(id: bucketId, label: "Gemini · Weekly", group: "Gemini", remainingFraction: remaining, resetTime: resetDate)
-                case "3p-5h":
-                    thirdParty5h = QuotaBucket(id: bucketId, label: "Claude/GPT · 5h Window", group: "Claude / GPT", remainingFraction: remaining, resetTime: resetDate)
-                case "3p-weekly":
-                    thirdPartyWeekly = QuotaBucket(id: bucketId, label: "Claude/GPT · Weekly", group: "Claude / GPT", remainingFraction: remaining, resetTime: resetDate)
-                default:
-                    break
-                }
-            }
+        return rawModels.compactMap { dict in
+            guard let name = dict["name"] as? String else { return nil }
+            let displayName = dict["displayName"] as? String ?? name
+            let quotaInfo = dict["quotaInfo"] as? [String: Any] ?? [:]
+            let remaining = quotaInfo["remainingFraction"] as? Double ?? 1.0
+            let resetStr = quotaInfo["resetTime"] as? String
+            let resetDate = resetStr.flatMap { isoFormatter.date(from: $0) ?? fallbackFormatter.date(from: $0) }
+            return ModelQuota(name: name, displayName: displayName, remainingFraction: remaining, resetTime: resetDate)
         }
-
-        return (gemini5h, geminiWeekly, thirdParty5h, thirdPartyWeekly)
     }
 
     private func fetchPlanName(token: String) async -> String? {
