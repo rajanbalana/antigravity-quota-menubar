@@ -35,8 +35,8 @@ public final class QuotaService: ObservableObject {
     }
     private let userAgent = "antigravity/2.8.0 darwin/arm64"
     private let tokenEndpoint = URL(string: "https://oauth2.googleapis.com/token")!
-    private let quotaEndpoint = URL(string: "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary")!
-    private let loadEndpoint = URL(string: "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist")!
+    private let quotaEndpoint = URL(string: "https://cloudcode-pa.googleapis.com/v1alpha/users/me:checkUserQuotaTier")!
+    private let loadEndpoint = URL(string: "https://cloudcode-pa.googleapis.com/v1alpha/users/me:getUserStatus")!
 
     private var cachedAccessTokens: [String: String] = [:]
     private var pollTimer: Timer? = nil
