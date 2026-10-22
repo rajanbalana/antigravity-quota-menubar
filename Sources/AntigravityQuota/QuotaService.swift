@@ -51,6 +51,7 @@ public final class QuotaService: ObservableObject {
                 (service: "gemini", account: "antigravity-primary")
             ],
             fileCandidates: [
+                ".antigravity-accounts/account-1/antigravity-oauth-token",
                 ".gemini/antigravity-cli/antigravity-oauth-token",
                 ".gemini/oauth_creds.json",
                 ".antigravity-accounts/account-1/.gemini/antigravity-cli/antigravity-oauth-token"
@@ -66,6 +67,7 @@ public final class QuotaService: ObservableObject {
                 (service: "gemini", account: "antigravity-acct2")
             ],
             fileCandidates: [
+                ".antigravity-accounts/account-2/antigravity-oauth-token",
                 ".antigravity-accounts/account-2/.gemini/antigravity-cli/antigravity-oauth-token",
                 ".gemini/antigravity-cli-acct2/antigravity-oauth-token",
                 ".gemini/antigravity-cli-2/antigravity-oauth-token",
