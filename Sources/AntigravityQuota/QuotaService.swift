@@ -35,8 +35,8 @@ public final class QuotaService: ObservableObject {
     }
     private let userAgent = "antigravity/2.8.0 darwin/arm64"
     private let tokenEndpoint = URL(string: "https://oauth2.googleapis.com/token")!
-    private let quotaEndpoint = URL(string: "https://cloudcode-pa.googleapis.com/v1alpha/users/me:checkUserQuotaTier")!
-    private let loadEndpoint = URL(string: "https://cloudcode-pa.googleapis.com/v1alpha/users/me:getUserStatus")!
+    private let quotaEndpoint = URL(string: "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary")!
+    private let loadEndpoint = URL(string: "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist")!
 
     private var cachedAccessTokens: [String: String] = [:]
     private var pollTimer: Timer? = nil
@@ -129,17 +129,21 @@ public final class QuotaService: ObservableObject {
 
                 // Fetch Quota Summary
                 do {
-                    let quotaJson = try await fetchQuota(token: token)
-                    acctState.tier = quotaJson["userQuotaTier"] as? String
-                    acctState.models = parseModelQuotas(quotaJson)
+                    let buckets = try await fetchQuotaSummary(token: token)
+                    acctState.gemini5h = buckets.gemini5h
+                    acctState.geminiWeekly = buckets.geminiWeekly
+                    acctState.thirdParty5h = buckets.thirdParty5h
+                    acctState.thirdPartyWeekly = buckets.thirdPartyWeekly
                 } catch let error as NSError where error.code == 401 {
                     // Token expired -> refresh and retry once
                     if let refreshToken = creds["refresh_token"] as? String {
                         let freshToken = try await exchangeRefreshToken(refreshToken)
                         cachedAccessTokens[def.id] = freshToken
-                        let quotaJson = try await fetchQuota(token: freshToken)
-                        acctState.tier = quotaJson["userQuotaTier"] as? String
-                        acctState.models = parseModelQuotas(quotaJson)
+                        let buckets = try await fetchQuotaSummary(token: freshToken)
+                        acctState.gemini5h = buckets.gemini5h
+                        acctState.geminiWeekly = buckets.geminiWeekly
+                        acctState.thirdParty5h = buckets.thirdParty5h
+                        acctState.thirdPartyWeekly = buckets.thirdPartyWeekly
                     } else {
                         throw error
                     }
@@ -271,7 +275,7 @@ public final class QuotaService: ObservableObject {
         return token
     }
 
-    private func fetchQuota(token: String) async throws -> [String: Any] {
+    private func fetchQuotaSummary(token: String) async throws -> (gemini5h: QuotaBucket?, geminiWeekly: QuotaBucket?, thirdParty5h: QuotaBucket?, thirdPartyWeekly: QuotaBucket?) {
         var request = URLRequest(url: quotaEndpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -293,27 +297,45 @@ public final class QuotaService: ObservableObject {
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return [:]
+            return (nil, nil, nil, nil)
         }
-        return json
+        return parseQuotaSummary(json)
     }
 
-    private func parseModelQuotas(_ json: [String: Any]) -> [ModelQuota] {
-        guard let rawModels = json["models"] as? [[String: Any]] else { return [] }
+    private func parseQuotaSummary(_ json: [String: Any]) -> (gemini5h: QuotaBucket?, geminiWeekly: QuotaBucket?, thirdParty5h: QuotaBucket?, thirdPartyWeekly: QuotaBucket?) {
+        guard let groups = json["groups"] as? [[String: Any]] else { return (nil, nil, nil, nil) }
         let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let fallbackFormatter = ISO8601DateFormatter()
-        fallbackFormatter.formatOptions = [.withInternetDateTime]
+        isoFormatter.formatOptions = [.withInternetDateTime]
 
-        return rawModels.compactMap { dict in
-            guard let name = dict["name"] as? String else { return nil }
-            let displayName = dict["displayName"] as? String ?? name
-            let quotaInfo = dict["quotaInfo"] as? [String: Any] ?? [:]
-            let remaining = quotaInfo["remainingFraction"] as? Double ?? 1.0
-            let resetStr = quotaInfo["resetTime"] as? String
-            let resetDate = resetStr.flatMap { isoFormatter.date(from: $0) ?? fallbackFormatter.date(from: $0) }
-            return ModelQuota(name: name, displayName: displayName, remainingFraction: remaining, resetTime: resetDate)
+        var gemini5h: QuotaBucket? = nil
+        var geminiWeekly: QuotaBucket? = nil
+        var thirdParty5h: QuotaBucket? = nil
+        var thirdPartyWeekly: QuotaBucket? = nil
+
+        for group in groups {
+            guard let buckets = group["buckets"] as? [[String: Any]] else { continue }
+            for bucket in buckets {
+                guard let bucketId = bucket["bucketId"] as? String else { continue }
+                let resetTimeString = bucket["resetTime"] as? String
+                let resetDate = resetTimeString.flatMap { isoFormatter.date(from: $0) }
+                let remaining = bucket["remainingFraction"] as? Double ?? 0.0
+
+                switch bucketId {
+                case "gemini-5h":
+                    gemini5h = QuotaBucket(id: bucketId, label: "Gemini · 5h Window", group: "Gemini", remainingFraction: remaining, resetTime: resetDate)
+                case "gemini-weekly":
+                    geminiWeekly = QuotaBucket(id: bucketId, label: "Gemini · Weekly", group: "Gemini", remainingFraction: remaining, resetTime: resetDate)
+                case "3p-5h":
+                    thirdParty5h = QuotaBucket(id: bucketId, label: "Claude/GPT · 5h Window", group: "Claude / GPT", remainingFraction: remaining, resetTime: resetDate)
+                case "3p-weekly":
+                    thirdPartyWeekly = QuotaBucket(id: bucketId, label: "Claude/GPT · Weekly", group: "Claude / GPT", remainingFraction: remaining, resetTime: resetDate)
+                default:
+                    break
+                }
+            }
         }
+
+        return (gemini5h, geminiWeekly, thirdParty5h, thirdPartyWeekly)
     }
 
     private func fetchPlanName(token: String) async -> String? {

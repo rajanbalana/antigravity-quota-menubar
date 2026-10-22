@@ -1,38 +1,5 @@
 import SwiftUI
 
-struct ModelQuotaRow: View {
-    let model: ModelQuota
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(model.displayName)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                Spacer()
-                Text("\(Int(round(model.remainingPercent)))% remaining")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(model.statusColor)
-            }
-
-            ProgressView(value: model.remainingPercent, total: 100.0)
-                .tint(model.statusColor)
-
-            HStack {
-                Text("Resets \(model.formattedCountdown)")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                Spacer()
-                Text("Used: \(String(format: "%.1f", model.usedPercent))%")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
-
 struct QuotaProgressRow: View {
     let label: String
     let bucket: QuotaBucket?
@@ -99,12 +66,7 @@ struct AccountQuotaCard: View {
                             .truncationMode(.middle)
                     }
 
-                    if let tier = account.tier {
-                        Text(tier.replacingOccurrences(of: "QUOTA_TIER_", with: "").capitalized + " Tier")
-                            .font(.caption2)
-                            .fontWeight(.medium)
-                            .foregroundColor(.secondary)
-                    } else if let plan = account.planName {
+                    if let plan = account.planName {
                         Text(plan)
                             .font(.caption2)
                             .fontWeight(.medium)
@@ -118,6 +80,7 @@ struct AccountQuotaCard: View {
                     Text("\(pct)%")
                         .font(.system(.subheadline, design: .monospaced))
                         .fontWeight(.bold)
+                        .foregroundColor(account.gemini5h?.statusColor ?? .primary)
                 }
             }
 
@@ -135,47 +98,33 @@ struct AccountQuotaCard: View {
                 .cornerRadius(6)
             }
 
-            // Models Section
-            if !account.models.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(account.models) { model in
-                        ModelQuotaRow(model: model)
-                        if model.id != account.models.last?.id {
-                            Divider()
-                        }
-                    }
-                }
-                .padding(10)
-                .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(8)
-            } else {
-                // Fallback to legacy sections
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("Google Gemini", systemImage: "sparkles")
-                        .font(.caption)
-                        .fontWeight(.bold)
-                        .foregroundColor(.secondary)
+            // Gemini Section
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Google Gemini", systemImage: "sparkles")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(.secondary)
 
-                    QuotaProgressRow(label: "5-Hour Window", bucket: account.gemini5h)
-                    QuotaProgressRow(label: "Weekly Limit", bucket: account.geminiWeekly)
-                }
-                .padding(8)
-                .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(8)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("Claude & GPT (3P)", systemImage: "cube.box")
-                        .font(.caption)
-                        .fontWeight(.bold)
-                        .foregroundColor(.secondary)
-
-                    QuotaProgressRow(label: "5-Hour Window", bucket: account.thirdParty5h)
-                    QuotaProgressRow(label: "Weekly Limit", bucket: account.thirdPartyWeekly)
-                }
-                .padding(8)
-                .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(8)
+                QuotaProgressRow(label: "5-Hour Window", bucket: account.gemini5h)
+                QuotaProgressRow(label: "Weekly Limit", bucket: account.geminiWeekly)
             }
+            .padding(8)
+            .background(Color(NSColor.controlBackgroundColor))
+            .cornerRadius(8)
+
+            // Claude / GPT (3P) Section
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Claude & GPT (3P)", systemImage: "cube.box")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(.secondary)
+
+                QuotaProgressRow(label: "5-Hour Window", bucket: account.thirdParty5h)
+                QuotaProgressRow(label: "Weekly Limit", bucket: account.thirdPartyWeekly)
+            }
+            .padding(8)
+            .background(Color(NSColor.controlBackgroundColor))
+            .cornerRadius(8)
         }
         .padding(10)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
