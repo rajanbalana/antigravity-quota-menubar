@@ -106,6 +106,10 @@ public struct AccountQuotaState: Identifiable, Sendable {
         if id == "account-2" { return "A2" }
         return String(id.prefix(2)).uppercased()
     }
+    public var tabTitle: String {
+        defaultName
+    }
+
 
     public var primaryPercent: Int? {
         if let g5h = gemini5h {

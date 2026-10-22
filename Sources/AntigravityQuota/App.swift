@@ -32,8 +32,8 @@ struct StatusLabel: View {
         HStack(spacing: 4) {
             Image(systemName: "chart.bar.fill")
             if service.state.accounts.count > 1 {
-                let parts = service.state.accounts.enumerated().map { idx, acct -> String in
-                    let prefix = "A\(idx + 1)"
+                let parts = service.state.accounts.map { acct -> String in
+                    let prefix = acct.shortLabel
                     if let pct = acct.primaryPercent {
                         return "\(prefix):\(pct)%"
                     } else if acct.isLoading {

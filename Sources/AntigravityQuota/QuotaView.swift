@@ -74,13 +74,18 @@ struct AccountQuotaCard: View {
                     }
                 }
 
-                Spacer()
+                Spacer(minLength: 8)
 
-                if let pct = account.primaryPercent {
+                if account.isLoading {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                        .frame(width: 16, height: 16)
+                } else if let pct = account.primaryPercent {
                     Text("\(pct)%")
                         .font(.system(.subheadline, design: .monospaced))
                         .fontWeight(.bold)
                         .foregroundColor(account.gemini5h?.statusColor ?? .primary)
+                        .layoutPriority(1)
                 }
             }
 
@@ -181,7 +186,7 @@ public struct QuotaMenuView: View {
                 )) {
                     Text("All").tag("all")
                     ForEach(service.state.accounts) { acct in
-                        Text(acct.displayName).tag(acct.id)
+                        Text(acct.tabTitle).tag(acct.id)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -214,18 +219,20 @@ public struct QuotaMenuView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 24)
+            } else if service.selectedTab != "all",
+                      let selectedAccount = service.state.accounts.first(where: { $0.id == service.selectedTab }) {
+                AccountQuotaCard(account: selectedAccount)
             } else {
                 ScrollView(.vertical, showsIndicators: true) {
                     VStack(spacing: 12) {
                         ForEach(service.state.accounts) { acct in
-                            if service.selectedTab == "all" || service.selectedTab == acct.id || service.state.accounts.count <= 1 {
-                                AccountQuotaCard(account: acct)
-                            }
+                            AccountQuotaCard(account: acct)
                         }
                     }
                     .padding(.vertical, 2)
+                    .padding(.trailing, 2)
                 }
-                .frame(maxHeight: service.state.accounts.count > 1 ? 460 : 360)
+                .frame(maxHeight: service.state.accounts.count > 1 ? 500 : 360)
             }
 
             Divider()
@@ -248,6 +255,6 @@ public struct QuotaMenuView: View {
             }
         }
         .padding(14)
-        .frame(width: 340)
+        .frame(width: 360)
     }
 }
