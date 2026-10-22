@@ -1,9 +1,29 @@
 import Foundation
 import Combine
 
+public struct AccountDefinition: Sendable {
+    public let id: String
+    public let defaultName: String
+    public let keychainCandidates: [(service: String, account: String)]
+    public let fileCandidates: [String]
+
+    public init(
+        id: String,
+        defaultName: String,
+        keychainCandidates: [(service: String, account: String)],
+        fileCandidates: [String]
+    ) {
+        self.id = id
+        self.defaultName = defaultName
+        self.keychainCandidates = keychainCandidates
+        self.fileCandidates = fileCandidates
+    }
+}
+
 @MainActor
 public final class QuotaService: ObservableObject {
     @Published public private(set) var state = QuotaState()
+    @Published public var selectedTab: String = "all"
 
     // Antigravity public installed-app client ID & secret
     private var publicClientId: String {
@@ -18,8 +38,44 @@ public final class QuotaService: ObservableObject {
     private let quotaEndpoint = URL(string: "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary")!
     private let loadEndpoint = URL(string: "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist")!
 
-    private var cachedAccessToken: String? = nil
+    private var cachedAccessTokens: [String: String] = [:]
     private var pollTimer: Timer? = nil
+
+    private let accountDefinitions: [AccountDefinition] = [
+        AccountDefinition(
+            id: "account-1",
+            defaultName: "Account 1",
+            keychainCandidates: [
+                (service: "gemini", account: "antigravity"),
+                (service: "gemini", account: "antigravity-1"),
+                (service: "gemini", account: "antigravity-primary")
+            ],
+            fileCandidates: [
+                ".gemini/antigravity-cli/antigravity-oauth-token",
+                ".gemini/oauth_creds.json",
+                ".antigravity-accounts/account-1/.gemini/antigravity-cli/antigravity-oauth-token"
+            ]
+        ),
+        AccountDefinition(
+            id: "account-2",
+            defaultName: "Account 2",
+            keychainCandidates: [
+                (service: "gemini", account: "antigravity-2"),
+                (service: "gemini", account: "antigravity-account-2"),
+                (service: "gemini-2", account: "antigravity"),
+                (service: "gemini", account: "antigravity-acct2")
+            ],
+            fileCandidates: [
+                ".antigravity-accounts/account-2/.gemini/antigravity-cli/antigravity-oauth-token",
+                ".gemini/antigravity-cli-acct2/antigravity-oauth-token",
+                ".gemini/antigravity-cli-2/antigravity-oauth-token",
+                ".gemini/antigravity-oauth-token-2",
+                ".gemini/antigravity-cli/antigravity-oauth-token-2",
+                ".gemini/oauth_creds_2.json",
+                ".gemini/oauth_creds-2.json"
+            ]
+        )
+    ]
 
     public init() {
         startTimer(interval: 180)
@@ -39,95 +95,154 @@ public final class QuotaService: ObservableObject {
 
     public func refresh() async {
         state.isLoading = true
-        state.errorMessage = nil
+        state.globalErrorMessage = nil
 
-        do {
-            let creds = try loadCredentials()
-            var accessToken = cachedAccessToken
+        var updatedAccounts: [AccountQuotaState] = []
 
-            // Try using cached token or refresh
-            if accessToken == nil, let refreshToken = creds["refresh_token"] as? String {
-                accessToken = try await exchangeRefreshToken(refreshToken)
-                self.cachedAccessToken = accessToken
-            } else if accessToken == nil, let initialToken = creds["access_token"] as? String {
-                accessToken = initialToken
+        for def in accountDefinitions {
+            guard let creds = loadCredentials(for: def) else {
+                continue
             }
 
-            guard let token = accessToken else {
-                throw NSError(domain: "AntigravityQuota", code: 1, userInfo: [NSLocalizedDescriptionKey: "No valid token found in credentials"])
-            }
+            var acctState = AccountQuotaState(
+                id: def.id,
+                defaultName: def.defaultName,
+                email: extractEmail(from: creds),
+                isLoading: true
+            )
 
-            // Fetch Quota Summary
             do {
-                try await fetchQuotaSummary(token: token)
-            } catch let error as NSError where error.code == 401 {
-                // Token expired -> refresh and retry once
-                if let refreshToken = creds["refresh_token"] as? String {
-                    let freshToken = try await exchangeRefreshToken(refreshToken)
-                    self.cachedAccessToken = freshToken
-                    try await fetchQuotaSummary(token: freshToken)
-                } else {
-                    throw error
+                var accessToken = cachedAccessTokens[def.id]
+
+                if accessToken == nil, let refreshToken = creds["refresh_token"] as? String {
+                    accessToken = try await exchangeRefreshToken(refreshToken)
+                    cachedAccessTokens[def.id] = accessToken
+                } else if accessToken == nil, let initialToken = creds["access_token"] as? String {
+                    accessToken = initialToken
                 }
+
+                guard let token = accessToken else {
+                    throw NSError(domain: "AntigravityQuota", code: 1, userInfo: [NSLocalizedDescriptionKey: "No valid token found in credentials"])
+                }
+
+                // Fetch Quota Summary
+                do {
+                    let buckets = try await fetchQuotaSummary(token: token)
+                    acctState.gemini5h = buckets.gemini5h
+                    acctState.geminiWeekly = buckets.geminiWeekly
+                    acctState.thirdParty5h = buckets.thirdParty5h
+                    acctState.thirdPartyWeekly = buckets.thirdPartyWeekly
+                } catch let error as NSError where error.code == 401 {
+                    // Token expired -> refresh and retry once
+                    if let refreshToken = creds["refresh_token"] as? String {
+                        let freshToken = try await exchangeRefreshToken(refreshToken)
+                        cachedAccessTokens[def.id] = freshToken
+                        let buckets = try await fetchQuotaSummary(token: freshToken)
+                        acctState.gemini5h = buckets.gemini5h
+                        acctState.geminiWeekly = buckets.geminiWeekly
+                        acctState.thirdParty5h = buckets.thirdParty5h
+                        acctState.thirdPartyWeekly = buckets.thirdPartyWeekly
+                    } else {
+                        throw error
+                    }
+                }
+
+                // Optional: fetch plan name
+                if let currentToken = cachedAccessTokens[def.id] ?? accessToken {
+                    acctState.planName = await fetchPlanName(token: currentToken)
+                }
+
+                acctState.lastUpdated = Date()
+                acctState.isLoading = false
+            } catch {
+                acctState.isLoading = false
+                acctState.errorMessage = error.localizedDescription
             }
 
-            // Optional: fetch plan name
-            if let currentToken = cachedAccessToken ?? accessToken {
-                await fetchPlanName(token: currentToken)
-            }
-
-            state.lastUpdated = Date()
-            state.isLoading = false
-        } catch {
-            state.isLoading = false
-            state.errorMessage = error.localizedDescription
+            updatedAccounts.append(acctState)
         }
+
+        if updatedAccounts.isEmpty {
+            state.globalErrorMessage = "Antigravity credentials not found in Keychain or ~/.gemini"
+        }
+
+        state.accounts = updatedAccounts
+        state.lastUpdated = Date()
+        state.isLoading = false
     }
 
-    private func loadCredentials() throws -> [String: Any] {
-        // 1. Try macOS Keychain (service: gemini, account: antigravity)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = ["find-generic-password", "-w", "-s", "gemini", "-a", "antigravity"]
+    private func loadCredentials(for def: AccountDefinition) -> [String: Any]? {
+        // 1. Try Keychain candidates
+        for candidate in def.keychainCandidates {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+            process.arguments = ["find-generic-password", "-w", "-s", candidate.service, "-a", candidate.account]
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = Pipe()
 
-        try? process.run()
-        process.waitUntilExit()
+            try? process.run()
+            process.waitUntilExit()
 
-        if process.terminationStatus == 0 {
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let string = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !string.isEmpty {
-                if let credData = string.data(using: .utf8), let json = try? JSONSerialization.jsonObject(with: credData) as? [String: Any] {
-                    if let tokenDict = json["token"] as? [String: Any] {
-                        return tokenDict
+            if process.terminationStatus == 0 {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let string = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !string.isEmpty {
+                    if let credData = string.data(using: .utf8), let json = try? JSONSerialization.jsonObject(with: credData) as? [String: Any] {
+                        return normalizeCredentials(json)
                     }
-                    return json
                 }
             }
         }
 
-        // 2. Fallback to CLI token file: ~/.gemini/antigravity-cli/antigravity-oauth-token
+        // 2. Try file paths
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let paths = [
-            home.appendingPathComponent(".gemini/antigravity-cli/antigravity-oauth-token"),
-            home.appendingPathComponent(".gemini/oauth_creds.json")
-        ]
-
-        for path in paths {
-            if let fileData = try? Data(contentsOf: path) {
-                if let json = try? JSONSerialization.jsonObject(with: fileData) as? [String: Any] {
-                    if let tokenDict = json["token"] as? [String: Any] {
-                        return tokenDict
-                    }
-                    return json
-                }
+        for relativePath in def.fileCandidates {
+            let path = home.appendingPathComponent(relativePath)
+            if let fileData = try? Data(contentsOf: path),
+               let json = try? JSONSerialization.jsonObject(with: fileData) as? [String: Any] {
+                return normalizeCredentials(json)
             }
         }
 
-        throw NSError(domain: "AntigravityQuota", code: 404, userInfo: [NSLocalizedDescriptionKey: "Antigravity credentials not found in Keychain or ~/.gemini"])
+        return nil
+    }
+
+    private func normalizeCredentials(_ json: [String: Any]) -> [String: Any] {
+        var credsDict: [String: Any] = [:]
+        if let tokenDict = json["token"] as? [String: Any] {
+            credsDict = tokenDict
+        } else {
+            credsDict = json
+        }
+        if let idToken = json["id_token"] as? String, credsDict["id_token"] == nil {
+            credsDict["id_token"] = idToken
+        }
+        if let email = json["email"] as? String, credsDict["email"] == nil {
+            credsDict["email"] = email
+        }
+        return credsDict
+    }
+
+    private func extractEmail(from creds: [String: Any]) -> String? {
+        if let email = creds["email"] as? String, !email.isEmpty {
+            return email
+        }
+        guard let idToken = creds["id_token"] as? String else { return nil }
+        let parts = idToken.components(separatedBy: ".")
+        guard parts.count >= 2 else { return nil }
+        var base64 = parts[1]
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while base64.count % 4 != 0 {
+            base64.append("=")
+        }
+        guard let data = Data(base64Encoded: base64),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let email = json["email"] as? String else {
+            return nil
+        }
+        return email
     }
 
     private func exchangeRefreshToken(_ refreshToken: String) async throws -> String {
@@ -158,7 +273,7 @@ public final class QuotaService: ObservableObject {
         return token
     }
 
-    private func fetchQuotaSummary(token: String) async throws {
+    private func fetchQuotaSummary(token: String) async throws -> (gemini5h: QuotaBucket?, geminiWeekly: QuotaBucket?, thirdParty5h: QuotaBucket?, thirdPartyWeekly: QuotaBucket?) {
         var request = URLRequest(url: quotaEndpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -179,12 +294,14 @@ public final class QuotaService: ObservableObject {
             throw NSError(domain: "AntigravityQuota", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Quota API returned status \(httpResponse.statusCode)"])
         }
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        parseQuotaSummary(json)
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return (nil, nil, nil, nil)
+        }
+        return parseQuotaSummary(json)
     }
 
-    private func parseQuotaSummary(_ json: [String: Any]) {
-        guard let groups = json["groups"] as? [[String: Any]] else { return }
+    private func parseQuotaSummary(_ json: [String: Any]) -> (gemini5h: QuotaBucket?, geminiWeekly: QuotaBucket?, thirdParty5h: QuotaBucket?, thirdPartyWeekly: QuotaBucket?) {
+        guard let groups = json["groups"] as? [[String: Any]] else { return (nil, nil, nil, nil) }
         let isoFormatter = ISO8601DateFormatter()
         isoFormatter.formatOptions = [.withInternetDateTime]
 
@@ -216,13 +333,10 @@ public final class QuotaService: ObservableObject {
             }
         }
 
-        state.gemini5h = gemini5h
-        state.geminiWeekly = geminiWeekly
-        state.thirdParty5h = thirdParty5h
-        state.thirdPartyWeekly = thirdPartyWeekly
+        return (gemini5h, geminiWeekly, thirdParty5h, thirdPartyWeekly)
     }
 
-    private func fetchPlanName(token: String) async {
+    private func fetchPlanName(token: String) async -> String? {
         var request = URLRequest(url: loadEndpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -232,12 +346,13 @@ public final class QuotaService: ObservableObject {
 
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
 
         if let paidTier = json["paidTier"] as? String, !paidTier.isEmpty {
-            state.planName = paidTier
+            return paidTier
         } else if let currentTier = json["currentTier"] as? String, !currentTier.isEmpty {
-            state.planName = currentTier
+            return currentTier
         }
+        return nil
     }
 }

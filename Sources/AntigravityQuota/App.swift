@@ -31,7 +31,20 @@ struct StatusLabel: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "chart.bar.fill")
-            if let pct = service.state.primaryPercent {
+            if service.state.accounts.count > 1 {
+                let parts = service.state.accounts.enumerated().map { idx, acct -> String in
+                    let prefix = "A\(idx + 1)"
+                    if let pct = acct.primaryPercent {
+                        return "\(prefix):\(pct)%"
+                    } else if acct.isLoading {
+                        return "\(prefix):..."
+                    } else {
+                        return "\(prefix):--"
+                    }
+                }
+                Text(parts.joined(separator: " · "))
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+            } else if let pct = service.state.primaryPercent {
                 Text("\(pct)%")
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
             } else if service.state.isLoading {

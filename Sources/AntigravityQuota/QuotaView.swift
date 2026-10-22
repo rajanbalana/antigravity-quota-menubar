@@ -42,6 +42,100 @@ struct QuotaProgressRow: View {
     }
 }
 
+struct AccountQuotaCard: View {
+    let account: AccountQuotaState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Account Header
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(account.shortLabel)
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.15))
+                            .foregroundColor(.blue)
+                            .cornerRadius(4)
+
+                        Text(account.displayName)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    if let plan = account.planName {
+                        Text(plan)
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                if let pct = account.primaryPercent {
+                    Text("\(pct)%")
+                        .font(.system(.subheadline, design: .monospaced))
+                        .fontWeight(.bold)
+                        .foregroundColor(account.gemini5h?.statusColor ?? .primary)
+                }
+            }
+
+            if let error = account.errorMessage {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                        .font(.caption)
+                    Text(error)
+                        .font(.caption2)
+                        .lineLimit(3)
+                }
+                .padding(6)
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(6)
+            }
+
+            // Gemini Section
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Google Gemini", systemImage: "sparkles")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(.secondary)
+
+                QuotaProgressRow(label: "5-Hour Window", bucket: account.gemini5h)
+                QuotaProgressRow(label: "Weekly Limit", bucket: account.geminiWeekly)
+            }
+            .padding(8)
+            .background(Color(NSColor.controlBackgroundColor))
+            .cornerRadius(8)
+
+            // Claude / GPT (3P) Section
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Claude & GPT (3P)", systemImage: "cube.box")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(.secondary)
+
+                QuotaProgressRow(label: "5-Hour Window", bucket: account.thirdParty5h)
+                QuotaProgressRow(label: "Weekly Limit", bucket: account.thirdPartyWeekly)
+            }
+            .padding(8)
+            .background(Color(NSColor.controlBackgroundColor))
+            .cornerRadius(8)
+        }
+        .padding(10)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+        )
+    }
+}
+
 public struct QuotaMenuView: View {
     @ObservedObject var service: QuotaService
 
@@ -50,17 +144,16 @@ public struct QuotaMenuView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             // Header
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Antigravity Quota")
                         .font(.headline)
-                    if let plan = service.state.planName {
-                        Text(plan)
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.blue)
+                    if service.state.accounts.count > 1 {
+                        Text("\(service.state.accounts.count) Accounts Connected")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
                     }
                 }
 
@@ -80,13 +173,27 @@ public struct QuotaMenuView: View {
                 .help("Refresh quota")
             }
 
+            // Tab Picker when multiple accounts exist
+            if service.state.accounts.count > 1 {
+                Picker("", selection: Binding(
+                    get: { service.selectedTab },
+                    set: { service.selectedTab = $0 }
+                )) {
+                    Text("All").tag("all")
+                    ForEach(service.state.accounts) { acct in
+                        Text(acct.displayName).tag(acct.id)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
             Divider()
 
-            if let error = service.state.errorMessage {
-                HStack {
+            if let globalError = service.state.globalErrorMessage {
+                HStack(alignment: .top, spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundColor(.orange)
-                    Text(error)
+                    Text(globalError)
                         .font(.caption)
                         .lineLimit(3)
                 }
@@ -95,33 +202,31 @@ public struct QuotaMenuView: View {
                 .cornerRadius(6)
             }
 
-            // Gemini Section
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Google Gemini", systemImage: "sparkles")
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundColor(.secondary)
-
-                QuotaProgressRow(label: "5-Hour Window", bucket: service.state.gemini5h)
-                QuotaProgressRow(label: "Weekly Limit", bucket: service.state.geminiWeekly)
+            // Accounts List / Card View
+            if service.state.accounts.isEmpty && !service.state.isLoading {
+                VStack(spacing: 6) {
+                    Text("No accounts found")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Text("Add credentials in Keychain or ~/.gemini")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+            } else {
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(spacing: 12) {
+                        ForEach(service.state.accounts) { acct in
+                            if service.selectedTab == "all" || service.selectedTab == acct.id || service.state.accounts.count <= 1 {
+                                AccountQuotaCard(account: acct)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .frame(maxHeight: service.state.accounts.count > 1 ? 460 : 360)
             }
-            .padding(10)
-            .background(Color(NSColor.controlBackgroundColor))
-            .cornerRadius(8)
-
-            // Claude / GPT (3P) Section
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Claude & GPT (3P)", systemImage: "cube.box")
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundColor(.secondary)
-
-                QuotaProgressRow(label: "5-Hour Window", bucket: service.state.thirdParty5h)
-                QuotaProgressRow(label: "Weekly Limit", bucket: service.state.thirdPartyWeekly)
-            }
-            .padding(10)
-            .background(Color(NSColor.controlBackgroundColor))
-            .cornerRadius(8)
 
             Divider()
 
@@ -143,6 +248,6 @@ public struct QuotaMenuView: View {
             }
         }
         .padding(14)
-        .frame(width: 320)
+        .frame(width: 340)
     }
 }
