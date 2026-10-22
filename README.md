@@ -12,10 +12,10 @@ A native macOS menu bar accessory app written in Swift & SwiftUI that tracks Goo
   - Segmented control to toggle between "All Accounts" or single-account inspection.
 - **Zero Config Auto-Discovery:** Automatically reads credentials from macOS Keychain or fallback CLI token files:
   - **Account 1 (Primary):**
-    - Files: `~/.antigravity-accounts/account-1/antigravity-oauth-token`, `~/.gemini/antigravity-cli/antigravity-oauth-token`, `~/.gemini/oauth_creds.json`
+    - Files: `~/.antigravity-account-1/antigravity-oauth-token`, `~/.gemini/antigravity-cli/antigravity-oauth-token`, `~/.gemini/oauth_creds.json`, `~/.antigravity-accounts/account-1/...`
     - Keychain: `service: gemini`, `account: antigravity` (or `antigravity-1`, `antigravity-primary`)
   - **Account 2:**
-    - Files: `~/.antigravity-accounts/account-2/antigravity-oauth-token`, `~/.antigravity-accounts/account-2/.gemini/...`, `~/.gemini/antigravity-cli-acct2/...`
+    - Files: `~/.antigravity-account-2/antigravity-oauth-token`, `~/.antigravity-account-2/.gemini/...`, `~/.antigravity-accounts/account-2/...`
     - Keychain: `service: gemini`, `account: antigravity-2` (or `antigravity-account-2`, `service: gemini-2`)
 - **Auto User Email Identification:** Automatically extracts the user's Google email from the OAuth `id_token` JWT payload and displays it alongside plan tiers.
 - **Token Auto-Refresh:** Transparently refreshes expired OAuth access tokens with Google's OAuth endpoint.
