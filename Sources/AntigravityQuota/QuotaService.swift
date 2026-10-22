@@ -129,21 +129,17 @@ public final class QuotaService: ObservableObject {
 
                 // Fetch Quota Summary
                 do {
-                    let buckets = try await fetchQuotaSummary(token: token)
-                    acctState.gemini5h = buckets.gemini5h
-                    acctState.geminiWeekly = buckets.geminiWeekly
-                    acctState.thirdParty5h = buckets.thirdParty5h
-                    acctState.thirdPartyWeekly = buckets.thirdPartyWeekly
+                    let quotaJson = try await fetchQuota(token: token)
+                    acctState.tier = quotaJson["userQuotaTier"] as? String
+                    acctState.models = parseModelQuotas(quotaJson)
                 } catch let error as NSError where error.code == 401 {
                     // Token expired -> refresh and retry once
                     if let refreshToken = creds["refresh_token"] as? String {
                         let freshToken = try await exchangeRefreshToken(refreshToken)
                         cachedAccessTokens[def.id] = freshToken
-                        let buckets = try await fetchQuotaSummary(token: freshToken)
-                        acctState.gemini5h = buckets.gemini5h
-                        acctState.geminiWeekly = buckets.geminiWeekly
-                        acctState.thirdParty5h = buckets.thirdParty5h
-                        acctState.thirdPartyWeekly = buckets.thirdPartyWeekly
+                        let quotaJson = try await fetchQuota(token: freshToken)
+                        acctState.tier = quotaJson["userQuotaTier"] as? String
+                        acctState.models = parseModelQuotas(quotaJson)
                     } else {
                         throw error
                     }
@@ -275,7 +271,7 @@ public final class QuotaService: ObservableObject {
         return token
     }
 
-    private func fetchQuotaSummary(token: String) async throws -> (gemini5h: QuotaBucket?, geminiWeekly: QuotaBucket?, thirdParty5h: QuotaBucket?, thirdPartyWeekly: QuotaBucket?) {
+    private func fetchQuota(token: String) async throws -> [String: Any] {
         var request = URLRequest(url: quotaEndpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -297,9 +293,9 @@ public final class QuotaService: ObservableObject {
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return (nil, nil, nil, nil)
+            return [:]
         }
-        return parseQuotaSummary(json)
+        return json
     }
 
     private func parseModelQuotas(_ json: [String: Any]) -> [ModelQuota] {
